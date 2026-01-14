@@ -1,0 +1,654 @@
+const express = require("express");
+const multer = require("multer");
+const XLSX = require("xlsx");
+const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
+const cors = require("cors");
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./swagger");
+const { generateEmailHTML, generateEmailText } = require("./email-template");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Swagger UI
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: "Email API Documentation"
+}));
+
+// Tạo thư mục uploads nếu chưa có
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+
+// Cấu hình multer để lưu file
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, uniqueSuffix + "-" + file.originalname);
+    },
+});
+
+const upload = multer({
+    storage: storage,
+    fileFilter: (req, file, cb) => {
+        // Chỉ chấp nhận file .xlsx
+        if (
+            file.mimetype ===
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+            file.originalname.endsWith(".xlsx")
+        ) {
+            cb(null, true);
+        } else {
+            cb(new Error("Chỉ chấp nhận file .xlsx"));
+        }
+    },
+});
+
+// Load environment variables
+function loadEnv() {
+    const envPath = path.join(__dirname, ".env");
+    if (!fs.existsSync(envPath)) {
+        return null;
+    }
+
+    const envContent = fs.readFileSync(envPath, "utf8");
+    const envVars = {};
+
+    envContent.split("\n").forEach((line) => {
+        line = line.trim();
+        if (line && !line.startsWith("#")) {
+            const [key, ...valueParts] = line.split("=");
+            const value = valueParts.join("=").trim();
+            envVars[key.trim()] = value;
+        }
+    });
+
+    return envVars;
+}
+
+// Đọc và nhóm dữ liệu từ Excel
+function readAndGroupOrders(filePath) {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+
+    // Nhóm theo email address
+    const emailGroups = {};
+
+    data.forEach((row) => {
+        const email = row["Email Address"];
+        const phone = row["Số điện thoại"];
+        const name = row["Tên người nhận"];
+
+        if (email && phone) {
+            const normalizedEmail = String(email).trim().toLowerCase();
+
+            if (!emailGroups[normalizedEmail]) {
+                emailGroups[normalizedEmail] = {
+                    email: normalizedEmail,
+                    phone: String(phone).trim(),
+                    name: name || "Khách hàng",
+                    orders: [],
+                };
+            }
+
+            emailGroups[normalizedEmail].orders.push(row);
+        }
+    });
+
+    return emailGroups;
+}
+
+// Tạo transporter
+function createTransporter(config) {
+    return nodemailer.createTransport({
+        host: config.SMTP_HOST,
+        port: parseInt(config.SMTP_PORT),
+        secure: config.SMTP_SECURE === "true",
+        auth: {
+            user: config.SMTP_USER,
+            pass: config.SMTP_PASS,
+        },
+    });
+}
+
+// Gửi email
+async function sendEmail(transporter, config, customerData) {
+    const { email, name, phone, orders } = customerData;
+
+    try {
+        const mailOptions = {
+            from: `"${config.FROM_NAME}" <${config.FROM_EMAIL}>`,
+            to: email,
+            subject: config.EMAIL_SUBJECT || "Xác nhận đơn hàng của bạn",
+            text: generateEmailText({ name, phone, email }, orders),
+            html: generateEmailHTML({ name, phone, email }, orders),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+// ============= API ENDPOINTS =============
+
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     tags: [Health]
+ *     summary: Health check
+ *     description: Kiểm tra server có đang hoạt động không
+ *     responses:
+ *       200:
+ *         description: Server đang hoạt động
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: OK
+ *                 message:
+ *                   type: string
+ *                   example: Email API Server is running
+ *                 endpoints:
+ *                   type: object
+ */
+app.get("/", (req, res) => {
+    res.json({
+        status: "OK",
+        message: "Email API Server is running",
+        endpoints: {
+            swagger: "GET /api-docs",
+            upload: "POST /api/upload",
+            preview: "GET /api/preview/:filename",
+            sendEmails: "POST /api/send-emails/:filename",
+            listFiles: "GET /api/files",
+        },
+    });
+});
+
+/**
+ * @swagger
+ * /api/upload:
+ *   post:
+ *     tags: [Files]
+ *     summary: Upload file Excel
+ *     description: Upload file .xlsx chứa dữ liệu đơn hàng
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: File Excel (.xlsx)
+ *     responses:
+ *       200:
+ *         description: Upload thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Upload file thành công
+ *                 file:
+ *                   type: object
+ *                   properties:
+ *                     filename:
+ *                       type: string
+ *                       example: 1234567890-test.xlsx
+ *                     originalName:
+ *                       type: string
+ *                       example: test.xlsx
+ *                     size:
+ *                       type: number
+ *                       example: 12345
+ *                     path:
+ *                       type: string
+ *                 preview:
+ *                   type: object
+ *                   properties:
+ *                     totalEmails:
+ *                       type: number
+ *                       example: 428
+ *                     totalOrders:
+ *                       type: number
+ *                       example: 493
+ *       400:
+ *         description: Không có file hoặc file không hợp lệ
+ *       500:
+ *         description: Lỗi server
+ */
+app.post("/api/upload", upload.single("file"), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "Không có file nào được upload",
+            });
+        }
+
+        // Đọc file để lấy thông tin preview
+        const filePath = req.file.path;
+        const emailGroups = readAndGroupOrders(filePath);
+        const totalEmails = Object.keys(emailGroups).length;
+        const totalOrders = Object.values(emailGroups).reduce(
+            (sum, group) => sum + group.orders.length,
+            0
+        );
+
+        res.json({
+            success: true,
+            message: "Upload file thành công",
+            file: {
+                filename: req.file.filename,
+                originalName: req.file.originalname,
+                size: req.file.size,
+                path: req.file.path,
+            },
+            preview: {
+                totalEmails: totalEmails,
+                totalOrders: totalOrders,
+            },
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Lỗi khi xử lý file",
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * @swagger
+ * /api/preview/{filename}:
+ *   get:
+ *     tags: [Files]
+ *     summary: Preview dữ liệu
+ *     description: Xem trước dữ liệu từ file đã upload
+ *     parameters:
+ *       - in: path
+ *         name: filename
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Tên file đã upload
+ *         example: 1234567890-test.xlsx
+ *     responses:
+ *       200:
+ *         description: Thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalEmails:
+ *                       type: number
+ *                       example: 428
+ *                     recipients:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           email:
+ *                             type: string
+ *                             example: customer@gmail.com
+ *                           name:
+ *                             type: string
+ *                             example: Nguyễn Văn A
+ *                           phone:
+ *                             type: string
+ *                             example: 0123456789
+ *                           orderCount:
+ *                             type: number
+ *                             example: 2
+ *       404:
+ *         description: File không tồn tại
+ *       500:
+ *         description: Lỗi server
+ */
+app.get("/api/preview/:filename", (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(uploadsDir, filename);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+                success: false,
+                message: "File không tồn tại",
+            });
+        }
+
+        const emailGroups = readAndGroupOrders(filePath);
+
+        res.json({
+            success: true,
+            data: {
+                totalEmails: Object.keys(emailGroups).length,
+                recipients: Object.entries(emailGroups).map(([email, data]) => ({
+                    email: email,
+                    name: data.name,
+                    phone: data.phone,
+                    orderCount: data.orders.length,
+                })),
+            },
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Lỗi khi đọc file",
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * @swagger
+ * /api/send-emails/{filename}:
+ *   post:
+ *     tags: [Email]
+ *     summary: Gửi email tự động
+ *     description: Gửi email xác nhận đơn hàng cho tất cả khách hàng trong file
+ *     parameters:
+ *       - in: path
+ *         name: filename
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Tên file đã upload
+ *         example: 1234567890-test.xlsx
+ *     responses:
+ *       200:
+ *         description: Gửi email thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Hoàn thành gửi email
+ *                 summary:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: number
+ *                       example: 428
+ *                     success:
+ *                       type: number
+ *                       example: 425
+ *                     failed:
+ *                       type: number
+ *                       example: 3
+ *                 results:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       email:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                         enum: [success, failed]
+ *                       orderCount:
+ *                         type: number
+ *                       error:
+ *                         type: string
+ *       404:
+ *         description: File không tồn tại
+ *       500:
+ *         description: Lỗi server hoặc SMTP
+ */
+app.post("/api/send-emails/:filename", async (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(uploadsDir, filename);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+                success: false,
+                message: "File không tồn tại",
+            });
+        }
+
+        // Load config
+        const config = loadEnv();
+        if (!config) {
+            return res.status(500).json({
+                success: false,
+                message: "Không tìm thấy file .env",
+            });
+        }
+
+        // Tạo transporter
+        const transporter = createTransporter(config);
+
+        // Verify connection
+        try {
+            await transporter.verify();
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: "Không thể kết nối đến SMTP server",
+                error: error.message,
+            });
+        }
+
+        // Đọc dữ liệu
+        const emailGroups = readAndGroupOrders(filePath);
+        const totalEmails = Object.keys(emailGroups).length;
+
+        // Gửi email
+        const results = [];
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const [email, customerData] of Object.entries(emailGroups)) {
+            const result = await sendEmail(transporter, config, customerData);
+
+            if (result.success) {
+                successCount++;
+                results.push({
+                    email: email,
+                    status: "success",
+                    orderCount: customerData.orders.length,
+                });
+            } else {
+                failCount++;
+                results.push({
+                    email: email,
+                    status: "failed",
+                    error: result.error,
+                    orderCount: customerData.orders.length,
+                });
+            }
+
+            // Delay 1 giây giữa các email
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
+        res.json({
+            success: true,
+            message: "Hoàn thành gửi email",
+            summary: {
+                total: totalEmails,
+                success: successCount,
+                failed: failCount,
+            },
+            results: results,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Lỗi khi gửi email",
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * @swagger
+ * /api/files:
+ *   get:
+ *     tags: [Files]
+ *     summary: Liệt kê file
+ *     description: Xem danh sách các file đã upload
+ *     responses:
+ *       200:
+ *         description: Thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 files:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       filename:
+ *                         type: string
+ *                         example: 1234567890-test.xlsx
+ *                       size:
+ *                         type: number
+ *                         example: 12345
+ *                       uploadedAt:
+ *                         type: string
+ *                         format: date-time
+ *       500:
+ *         description: Lỗi server
+ */
+app.get("/api/files", (req, res) => {
+    try {
+        const files = fs.readdirSync(uploadsDir);
+        const fileList = files.map((filename) => {
+            const filePath = path.join(uploadsDir, filename);
+            const stats = fs.statSync(filePath);
+            return {
+                filename: filename,
+                size: stats.size,
+                uploadedAt: stats.mtime,
+            };
+        });
+
+        res.json({
+            success: true,
+            files: fileList,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Lỗi khi đọc danh sách file",
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * @swagger
+ * /api/files/{filename}:
+ *   delete:
+ *     tags: [Files]
+ *     summary: Xóa file
+ *     description: Xóa file đã upload
+ *     parameters:
+ *       - in: path
+ *         name: filename
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Tên file cần xóa
+ *         example: 1234567890-test.xlsx
+ *     responses:
+ *       200:
+ *         description: Xóa thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Xóa file thành công
+ *       404:
+ *         description: File không tồn tại
+ *       500:
+ *         description: Lỗi server
+ */
+app.delete("/api/files/:filename", (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(uploadsDir, filename);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+                success: false,
+                message: "File không tồn tại",
+            });
+        }
+
+        fs.unlinkSync(filePath);
+
+        res.json({
+            success: true,
+            message: "Xóa file thành công",
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Lỗi khi xóa file",
+            error: error.message,
+        });
+    }
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+    console.log(`📚 Swagger UI: http://localhost:${PORT}/api-docs`);
+    console.log(`📝 API Docs: http://localhost:${PORT}`);
+});
