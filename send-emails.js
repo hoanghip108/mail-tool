@@ -54,11 +54,11 @@ function readAndGroupOrders(filePath) {
 
     console.log(`📊 Tổng số dòng dữ liệu: ${data.length}`);
 
-    // Nhóm theo email address
+    // Nhóm theo email
     const emailGroups = {};
 
     data.forEach((row) => {
-        const email = row["Email Address"];
+        const email = row["Email"];
         const phone = row["Số điện thoại"];
         const name = row["Tên người nhận"];
 

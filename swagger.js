@@ -6,7 +6,8 @@ const options = {
         info: {
             title: "Email Automation API",
             version: "1.0.0",
-            description: "API để upload file Excel và gửi email tự động cho khách hàng",
+            description:
+                "API để upload file Excel và gửi email tự động cho khách hàng",
             contact: {
                 name: "Storydesk",
                 email: "support@storydesk.co",
