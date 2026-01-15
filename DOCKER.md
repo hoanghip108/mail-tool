@@ -52,8 +52,9 @@ docker-compose down
 
 ### 3. Truy cập
 
-- API: `http://localhost:3000`
+- API: `http://localhost:3000` (từ host machine)
 - Swagger UI: `http://localhost:3000/api-docs`
+- Server listen trên: `0.0.0.0:3000` (accept từ tất cả network interfaces)
 
 ## 📦 Docker Commands
 
