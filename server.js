@@ -12,58 +12,77 @@ const { generateEmailHTML, generateEmailText } = require("./email-template");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Request logger middleware - MUST BE EARLY
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+});
+
 // CORS Middleware - Must be first!
 app.use((req, res, next) => {
     // Get origin from request
     const origin = req.headers.origin;
-    
+
     // List of allowed origins (empty array = allow all)
     const allowedOrigins = [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:8080',
-        'https://phuphiem-api.site',
-        'http://phuphiem-api.site',
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8080",
+        "https://phuphiem-api.site",
+        "http://phuphiem-api.site",
         // Add more domains if needed
     ];
-    
+
     // Allow all origins or check whitelist
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin) || !origin) {
+    if (
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        !origin
+    ) {
         res.setHeader("Access-Control-Allow-Origin", origin || "*");
     } else {
         res.setHeader("Access-Control-Allow-Origin", "*");
     }
-    
+
     // Allow methods
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD");
-    
+    res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+    );
+
     // Allow headers
     res.setHeader(
         "Access-Control-Allow-Headers",
         "Origin, X-Requested-With, Content-Type, Accept, Authorization, " +
-        "ngrok-skip-browser-warning, X-CSRF-Token, Accept-Version, " +
-        "Content-Length, Content-MD5, Date, X-Api-Version, Cache-Control"
+            "ngrok-skip-browser-warning, X-CSRF-Token, Accept-Version, " +
+            "Content-Length, Content-MD5, Date, X-Api-Version, Cache-Control"
     );
-    
+
     // Expose headers
-    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Type, Content-Disposition");
-    
+    res.setHeader(
+        "Access-Control-Expose-Headers",
+        "Content-Length, Content-Type, Content-Disposition"
+    );
+
     // Allow credentials
     res.setHeader("Access-Control-Allow-Credentials", "true");
-    
+
     // Cache preflight for 24 hours
     res.setHeader("Access-Control-Max-Age", "86400");
-    
+
     // Additional security headers for HTTPS
-    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
-        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    if (req.secure || req.headers["x-forwarded-proto"] === "https") {
+        res.setHeader(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains"
+        );
     }
-    
+
     // Handle preflight
     if (req.method === "OPTIONS") {
         return res.status(204).end();
     }
-    
+
     next();
 });
 
@@ -145,36 +164,64 @@ function loadEnv() {
 
 // Đọc và nhóm dữ liệu từ Excel
 function readAndGroupOrders(filePath) {
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    try {
+        // Debug logging
+        console.log("[readAndGroupOrders] Reading file:", filePath);
 
-    // Nhóm theo email address
-    const emailGroups = {};
-
-    data.forEach((row) => {
-        const email = row["Email Address"];
-        const phone = row["Số điện thoại"];
-        const name = row["Tên người nhận"];
-
-        if (email && phone) {
-            const normalizedEmail = String(email).trim().toLowerCase();
-
-            if (!emailGroups[normalizedEmail]) {
-                emailGroups[normalizedEmail] = {
-                    email: normalizedEmail,
-                    phone: String(phone).trim(),
-                    name: name || "Khách hàng",
-                    orders: [],
-                };
-            }
-
-            emailGroups[normalizedEmail].orders.push(row);
+        // Check if path exists and is a file
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`File not found: ${filePath}`);
         }
-    });
 
-    return emailGroups;
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+            throw new Error(`Path is a directory, not a file: ${filePath}`);
+        }
+
+        console.log("[readAndGroupOrders] File size:", stats.size, "bytes");
+
+        const workbook = XLSX.readFile(filePath);
+        const sheetName = workbook.SheetNames[0];
+        console.log("[readAndGroupOrders] Sheet name:", sheetName);
+
+        const worksheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(worksheet);
+        console.log("[readAndGroupOrders] Total rows:", data.length);
+
+        // Nhóm theo email address
+        const emailGroups = {};
+
+        data.forEach((row) => {
+            const email = row["Email Address"];
+            const phone = row["Số điện thoại"];
+            const name = row["Tên người nhận"];
+
+            if (email && phone) {
+                const normalizedEmail = String(email).trim().toLowerCase();
+
+                if (!emailGroups[normalizedEmail]) {
+                    emailGroups[normalizedEmail] = {
+                        email: normalizedEmail,
+                        phone: String(phone).trim(),
+                        name: name || "Khách hàng",
+                        orders: [],
+                    };
+                }
+
+                emailGroups[normalizedEmail].orders.push(row);
+            }
+        });
+
+        console.log(
+            "[readAndGroupOrders] Email groups:",
+            Object.keys(emailGroups).length
+        );
+        return emailGroups;
+    } catch (error) {
+        console.error("[readAndGroupOrders] Error:", error.message);
+        console.error("[readAndGroupOrders] Stack:", error.stack);
+        throw error;
+    }
 }
 
 // Tạo transporter
@@ -410,12 +457,33 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
 app.get("/api/preview/:filename", (req, res) => {
     try {
         const filename = req.params.filename;
+
+        // Validate filename
+        if (!filename || filename.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Tên file không hợp lệ",
+            });
+        }
+
         const filePath = path.join(uploadsDir, filename);
 
+        // Check if path exists
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({
                 success: false,
                 message: "File không tồn tại",
+                filename: filename,
+            });
+        }
+
+        // Check if it's a file (not a directory)
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+            return res.status(400).json({
+                success: false,
+                message: "Path là thư mục, không phải file",
+                filename: filename,
             });
         }
 
@@ -507,12 +575,58 @@ app.get("/api/preview/:filename", (req, res) => {
 app.post("/api/send-emails/:filename", async (req, res) => {
     try {
         const filename = req.params.filename;
-        const filePath = path.join(uploadsDir, filename);
 
+        // Extensive logging
+        console.log("=== SEND EMAIL REQUEST ===");
+        console.log("Filename param:", filename);
+        console.log("__dirname:", __dirname);
+        console.log("uploadsDir:", uploadsDir);
+
+        // Validate filename
+        if (!filename || filename.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Tên file không hợp lệ",
+            });
+        }
+
+        const filePath = path.join(uploadsDir, filename);
+        console.log("Constructed filePath:", filePath);
+
+        // List all files in uploads directory for debugging
+        try {
+            const allFiles = fs.readdirSync(uploadsDir);
+            console.log("Files in uploads directory:", allFiles);
+        } catch (e) {
+            console.error("Error listing uploads directory:", e.message);
+        }
+
+        // Check if path exists
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({
                 success: false,
                 message: "File không tồn tại",
+                filename: filename,
+                searchPath: filePath,
+                uploadsDir: uploadsDir,
+            });
+        }
+
+        // Check if it's a file (not a directory)
+        const stats = fs.statSync(filePath);
+        console.log("File stats:", {
+            isFile: stats.isFile(),
+            isDirectory: stats.isDirectory(),
+            size: stats.size,
+        });
+
+        if (stats.isDirectory()) {
+            return res.status(400).json({
+                success: false,
+                message: "Path là thư mục, không phải file",
+                filename: filename,
+                filePath: filePath,
+                hint: "Vui lòng cung cấp tên file cụ thể (ví dụ: 1234567890-test.xlsx)",
             });
         }
 
@@ -540,8 +654,23 @@ app.post("/api/send-emails/:filename", async (req, res) => {
         }
 
         // Đọc dữ liệu
-        const emailGroups = readAndGroupOrders(filePath);
+        console.log("About to read and group orders from:", filePath);
+        let emailGroups;
+        try {
+            emailGroups = readAndGroupOrders(filePath);
+        } catch (readError) {
+            console.error("Error in readAndGroupOrders:", readError);
+            return res.status(500).json({
+                success: false,
+                message: "Lỗi khi đọc file Excel",
+                error: readError.message,
+                filePath: filePath,
+                stack: readError.stack,
+            });
+        }
+
         const totalEmails = Object.keys(emailGroups).length;
+        console.log("Total emails to send:", totalEmails);
 
         // Gửi email
         const results = [];
@@ -629,18 +758,27 @@ app.post("/api/send-emails/:filename", async (req, res) => {
 app.get("/api/files", (req, res) => {
     try {
         const files = fs.readdirSync(uploadsDir);
-        const fileList = files.map((filename) => {
-            const filePath = path.join(uploadsDir, filename);
-            const stats = fs.statSync(filePath);
-            return {
-                filename: filename,
-                size: stats.size,
-                uploadedAt: stats.mtime,
-            };
-        });
+        // Filter only files (not directories)
+        const fileList = files
+            .filter((filename) => {
+                const filePath = path.join(uploadsDir, filename);
+                const stats = fs.statSync(filePath);
+                return stats.isFile(); // Only include files
+            })
+            .map((filename) => {
+                const filePath = path.join(uploadsDir, filename);
+                const stats = fs.statSync(filePath);
+                return {
+                    filename: filename,
+                    size: stats.size,
+                    uploadedAt: stats.mtime,
+                    isFile: true,
+                };
+            });
 
         res.json({
             success: true,
+            count: fileList.length,
             files: fileList,
         });
     } catch (error) {
@@ -689,12 +827,33 @@ app.get("/api/files", (req, res) => {
 app.delete("/api/files/:filename", (req, res) => {
     try {
         const filename = req.params.filename;
+
+        // Validate filename
+        if (!filename || filename.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Tên file không hợp lệ",
+            });
+        }
+
         const filePath = path.join(uploadsDir, filename);
 
+        // Check if path exists
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({
                 success: false,
                 message: "File không tồn tại",
+                filename: filename,
+            });
+        }
+
+        // Check if it's a file (not a directory)
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+            return res.status(400).json({
+                success: false,
+                message: "Không thể xóa thư mục, chỉ xóa được file",
+                filename: filename,
             });
         }
 
@@ -714,11 +873,22 @@ app.delete("/api/files/:filename", (req, res) => {
 });
 
 // Start server
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || "0.0.0.0";
 
 app.listen(PORT, HOST, () => {
+    const timestamp = new Date().toISOString();
+    console.log("=".repeat(50));
+    console.log(`[${timestamp}] SERVER STARTED`);
+    console.log("=".repeat(50));
     console.log(`🚀 Server đang chạy tại http://${HOST}:${PORT}`);
     console.log(`📚 Swagger UI: http://${HOST}:${PORT}/api-docs`);
     console.log(`📝 API Docs: http://${HOST}:${PORT}`);
     console.log(`💡 Local access: http://localhost:${PORT}`);
+    console.log(`📁 Uploads dir: ${uploadsDir}`);
+    console.log(`🔧 Node version: ${process.version}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+    console.log("=".repeat(50));
+
+    // Test log to verify logging works
+    console.log("[TEST] If you see this, logging is working!");
 });
