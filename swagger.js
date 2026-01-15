@@ -15,7 +15,11 @@ const options = {
         servers: [
             {
                 url: "http://localhost:3000",
-                description: "Development server",
+                description: "Development server (Local)",
+            },
+            {
+                url: "https://c1293854e14e.ngrok-free.app",
+                description: "Ngrok Tunnel",
             },
         ],
         tags: [

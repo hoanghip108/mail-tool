@@ -1,0 +1,39 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Tests
+coverage/
+.nyc_output/
+
+# Uploads (sẽ được mount từ host)
+uploads/*
+!uploads/.gitkeep
+
+# Env files (sẽ được mount riêng)
+.env
+.env.local
+.env.*.local
+
+# Documentation
+*.md
+!README.md
+
+# Output files
+output.xlsx
+
+# Logs
+logs/
+*.log

@@ -13,16 +13,39 @@ Hệ thống tự động gửi email xác nhận đơn hàng cho khách hàng d
 
 ## 📋 Yêu cầu
 
-- Node.js đã cài đặt
+**Chạy với Node.js:**
+- Node.js 18+ đã cài đặt
 - File Excel chứa dữ liệu đơn hàng (`test.xlsx`)
 - Tài khoản email SMTP (Gmail, Outlook, Yahoo, v.v.)
 
+**Chạy với Docker:**
+- Docker Desktop hoặc Docker Engine
+- Docker Compose v3.8+
+- File `.env` với thông tin SMTP
+
 ## 🚀 Cài đặt
+
+### Phương án 1: Chạy với Node.js
 
 1. Cài đặt các package cần thiết:
 ```bash
 npm install
 ```
+
+### Phương án 2: Chạy với Docker 🐳
+
+```bash
+# Build và start
+docker-compose up -d
+
+# Xem logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+📖 **Xem chi tiết**: [DOCKER.md](./DOCKER.md)
 
 2. Tạo file cấu hình `.env`:
 ```bash

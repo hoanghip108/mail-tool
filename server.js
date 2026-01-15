@@ -12,16 +12,41 @@ const { generateEmailHTML, generateEmailText } = require("./email-template");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Middleware - Allow all CORS (including ngrok)
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, ngrok-skip-browser-warning");
+    res.header("Access-Control-Allow-Credentials", "true");
+    
+    // Handle preflight
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Swagger UI
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: "Email API Documentation"
-}));
+app.use(
+    "/api-docs",
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+        customCss: ".swagger-ui .topbar { display: none }",
+        customSiteTitle: "Email API Documentation",
+        swaggerOptions: {
+            persistAuthorization: true,
+            requestInterceptor: (req) => {
+                // Add ngrok header to bypass warning page
+                req.headers["ngrok-skip-browser-warning"] = "true";
+                return req;
+            },
+        },
+    })
+);
 
 // Tạo thư mục uploads nếu chưa có
 const uploadsDir = path.join(__dirname, "uploads");
@@ -360,12 +385,14 @@ app.get("/api/preview/:filename", (req, res) => {
             success: true,
             data: {
                 totalEmails: Object.keys(emailGroups).length,
-                recipients: Object.entries(emailGroups).map(([email, data]) => ({
-                    email: email,
-                    name: data.name,
-                    phone: data.phone,
-                    orderCount: data.orders.length,
-                })),
+                recipients: Object.entries(emailGroups).map(
+                    ([email, data]) => ({
+                        email: email,
+                        name: data.name,
+                        phone: data.phone,
+                        orderCount: data.orders.length,
+                    })
+                ),
             },
         });
     } catch (error) {
