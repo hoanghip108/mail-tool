@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 CORS Test Tool</h1>
+    
+    <div class="test-section">
+        <h2>Server URL</h2>
+        <input type="text" id="serverUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+        <button onclick="testConnection()">Test Connection</button>
+        <div id="connectionResult" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>1. Test Health Endpoint</h2>
+        <button onclick="testHealth()">Test GET /</button>
+        <div id="healthResult" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test File Upload</h2>
+        <input type="file" id="fileInput" accept=".xlsx">
+        <button onclick="testUpload()">Upload File</button>
+        <div id="uploadResult" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Test List Files</h2>
+        <button onclick="testListFiles()">GET /api/files</button>
+        <div id="listResult" class="result" style="display:none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Test CORS Headers</h2>
+        <button onclick="testCorsHeaders()">Check CORS Headers</button>
+        <div id="corsResult" class="result" style="display:none;"></div>
+    </div>
+
+    <script>
+        function getServerUrl() {
+            return document.getElementById('serverUrl').value;
+        }
+
+        function showResult(elementId, message, isSuccess = true) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.className = 'result ' + (isSuccess ? 'success' : 'error');
+            element.textContent = message;
+        }
+
+        async function testConnection() {
+            const url = getServerUrl();
+            try {
+                const response = await fetch(url);
+                showResult('connectionResult', `✅ Connection successful!\nStatus: ${response.status}\nURL: ${url}`, true);
+            } catch (error) {
+                showResult('connectionResult', `❌ Connection failed!\nError: ${error.message}`, false);
+            }
+        }
+
+        async function testHealth() {
+            const url = getServerUrl();
+            try {
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                const data = await response.json();
+                showResult('healthResult', `✅ Success!\n${JSON.stringify(data, null, 2)}`, true);
+            } catch (error) {
+                showResult('healthResult', `❌ Error!\n${error.message}`, false);
+            }
+        }
+
+        async function testUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showResult('uploadResult', '❌ Please select a file first!', false);
+                return;
+            }
+
+            const url = getServerUrl() + '/api/upload';
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                const data = await response.json();
+                showResult('uploadResult', `✅ Upload successful!\n${JSON.stringify(data, null, 2)}`, true);
+            } catch (error) {
+                showResult('uploadResult', `❌ Upload failed!\n${error.message}`, false);
+            }
+        }
+
+        async function testListFiles() {
+            const url = getServerUrl() + '/api/files';
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                const data = await response.json();
+                showResult('listResult', `✅ Success!\n${JSON.stringify(data, null, 2)}`, true);
+            } catch (error) {
+                showResult('listResult', `❌ Error!\n${error.message}`, false);
+            }
+        }
+
+        async function testCorsHeaders() {
+            const url = getServerUrl();
+            try {
+                const response = await fetch(url, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'content-type'
+                    }
+                });
+
+                const headers = {};
+                response.headers.forEach((value, key) => {
+                    if (key.toLowerCase().includes('access-control')) {
+                        headers[key] = value;
+                    }
+                });
+
+                showResult('corsResult', 
+                    `✅ CORS Headers:\n${JSON.stringify(headers, null, 2)}\n\nStatus: ${response.status}`, 
+                    true
+                );
+            } catch (error) {
+                showResult('corsResult', `❌ Error!\n${error.message}`, false);
+            }
+        }
+    </script>
+</body>
+</html>

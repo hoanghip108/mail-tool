@@ -117,7 +117,10 @@ http://localhost:3000/api-docs
 📖 Xem chi tiết tại:
 - [API_DOCS.md](./API_DOCS.md) - Markdown docs
 - [SWAGGER.md](./SWAGGER.md) - Swagger guide
-- `http://localhost:3000/api-docs` - Interactive Swagger UI
+- [AWS_DEPLOY.md](./AWS_DEPLOY.md) - AWS deployment & CORS troubleshooting
+- [DOCKER.md](./DOCKER.md) - Docker deployment guide
+- Production: `https://phuphiem-api.site/api-docs`
+- Local: `http://localhost:3000/api-docs`
 
 **Test với cURL:**
 ```bash

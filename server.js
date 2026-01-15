@@ -12,23 +12,63 @@ const { generateEmailHTML, generateEmailText } = require("./email-template");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware - Allow all CORS (including ngrok)
+// CORS Middleware - Must be first!
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, ngrok-skip-browser-warning");
-    res.header("Access-Control-Allow-Credentials", "true");
+    // Get origin from request
+    const origin = req.headers.origin;
+    
+    // List of allowed origins (empty array = allow all)
+    const allowedOrigins = [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:8080',
+        'https://phuphiem-api.site',
+        'http://phuphiem-api.site',
+        // Add more domains if needed
+    ];
+    
+    // Allow all origins or check whitelist
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin) || !origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin || "*");
+    } else {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    
+    // Allow methods
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD");
+    
+    // Allow headers
+    res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Origin, X-Requested-With, Content-Type, Accept, Authorization, " +
+        "ngrok-skip-browser-warning, X-CSRF-Token, Accept-Version, " +
+        "Content-Length, Content-MD5, Date, X-Api-Version, Cache-Control"
+    );
+    
+    // Expose headers
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Type, Content-Disposition");
+    
+    // Allow credentials
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    
+    // Cache preflight for 24 hours
+    res.setHeader("Access-Control-Max-Age", "86400");
+    
+    // Additional security headers for HTTPS
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     
     // Handle preflight
     if (req.method === "OPTIONS") {
-        return res.sendStatus(200);
+        return res.status(204).end();
     }
     
     next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Swagger UI
 app.use(

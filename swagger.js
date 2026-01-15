@@ -14,12 +14,16 @@ const options = {
         },
         servers: [
             {
+                url: "https://phuphiem-api.site",
+                description: "Production (AWS)",
+            },
+            {
                 url: "http://localhost:3000",
-                description: "Development server (Local)",
+                description: "Development (Local)",
             },
             {
                 url: "https://c1293854e14e.ngrok-free.app",
-                description: "Ngrok Tunnel",
+                description: "Ngrok Tunnel (Testing)",
             },
         ],
         tags: [
